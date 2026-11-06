@@ -1,0 +1,8 @@
+# Outbound network rules for every claude-box session: "allow CIDR" / "block CIDR".
+# First match wins; anything not matched is allowed (= internet and everything else).
+# The container's DNS servers are always allowed. Changes apply on the next start, no rebuild.
+#
+# Company LAN: only the gateway and DNS are reachable, the rest of 10.42.x.x is blocked.
+allow 10.42.0.1
+allow 10.42.0.3
+block 10.42.0.0/16

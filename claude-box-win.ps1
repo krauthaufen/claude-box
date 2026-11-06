@@ -22,6 +22,9 @@ $PkgFile = Join-Path $ConfDir 'packages'; $SetupFile = Join-Path $ConfDir 'setup
 if (-not (Test-Path $PkgFile)) { New-Item -ItemType Directory -Force $ConfDir | Out-Null; Copy-Item (Join-Path $Repo 'packages.default') $PkgFile }
 $Packages = ((Get-Content $PkgFile | ForEach-Object { ($_ -replace '#.*','').Trim() }) -join ' ') -replace '\s+',' '
 $Packages = $Packages.Trim()
+$NetFile = Join-Path $ConfDir 'network'
+if (-not (Test-Path $NetFile)) { Copy-Item (Join-Path $Repo 'network.default') $NetFile }
+$NetRules = ((Get-Content $NetFile | ForEach-Object { ($_ -replace '#.*','').Trim() } | Where-Object { $_ }) -join "`n")
 $SetupB64 = ''
 if (Test-Path $SetupFile) { $SetupB64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($SetupFile)) }
 
@@ -36,7 +39,7 @@ if (-not $Version) { $Version = 'latest' }
 $UName = (($env:USERNAME.ToLower()) -replace '[^a-z0-9_-]','')
 if (-not $UName -or $UName -notmatch '^[a-z_]') { $UName = 'claude' }
 $CHome = "/home/$UName"
-$Hash = Sha ((Get-Content -Raw (Join-Path $Repo 'Dockerfile')) + "|$Packages|$SetupB64|$CHome")
+$Hash = Sha ((Get-Content -Raw (Join-Path $Repo 'Dockerfile')) + (Get-Content -Raw (Join-Path $Repo 'entry.sh')) + "|$Packages|$SetupB64|$CHome")
 $Image = if ($env:CLAUDE_BOX_IMAGE) { $env:CLAUDE_BOX_IMAGE } else { 'claude-box' }
 $Tag = "${Image}:$Version-1000-$Hash"
 $Rest = @($args)
@@ -133,5 +136,5 @@ $DArgs += @('-e', 'TERM=xterm-256color')
 $Tty = if ([Console]::IsInputRedirected -or [Console]::IsOutputRedirected) { '-i' } else { '-it' }
 $Extra = @(); if ($env:CLAUDE_BOX_DOCKER_ARGS) { $Extra = $env:CLAUDE_BOX_DOCKER_ARGS -split '\s+' }
 $Mem = if ($env:CLAUDE_BOX_MEMORY) { $env:CLAUDE_BOX_MEMORY } else { '8g' }
-& docker run --rm $Tty --hostname $env:COMPUTERNAME --cap-drop ALL --security-opt no-new-privileges --pids-limit 4096 --memory $Mem @Extra @DArgs $Tag @Rest
+& docker run --rm $Tty --hostname $env:COMPUTERNAME --cap-drop ALL --cap-add NET_ADMIN --cap-add SETUID --cap-add SETGID --cap-add SETPCAP --security-opt no-new-privileges --pids-limit 4096 --memory $Mem @Extra @DArgs -e "CLAUDE_BOX_NET=$NetRules" $Tag @Rest
 exit $LASTEXITCODE

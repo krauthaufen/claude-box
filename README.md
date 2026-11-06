@@ -39,7 +39,7 @@ Update with `git pull`.
 | global `CLAUDE.md`, settings, skills, agents, plugins | copied in on each launch, box changes are discarded |
 | files `@imported` by global `CLAUDE.md` | read-only |
 | rest of the host | not visible |
-| internet | full access |
+| network | everything allowed except `10.42.x.x`; there only `10.42.0.1` (gateway) and `10.42.0.3` (DNS) |
 
 The rule: nothing the box writes is later executed by the host (no planted hooks, MCP servers or git hooks).
 The container runs as your user, without sudo or capabilities, with pid and memory limits.
@@ -47,6 +47,13 @@ The container runs as your user, without sudo or capabilities, with pid and memo
 **What it does not protect against:** the agent can still write malicious or broken code into your repo.
 Anything it changes there runs when you build, test or run the project, and so does anything anyone pulls from you.
 Review `git diff` before building or pushing, as you would a PR from a stranger.
+
+## Network
+
+`~/.config/claude-box/network` (Windows: `%APPDATA%\claude-box\network`) holds `allow CIDR` / `block CIDR` lines.
+The first match wins and anything unmatched is allowed. The defaults are in `network.default`.
+The rules are applied inside the container before Claude starts, and the session then runs without capabilities, so it can't change them.
+If they can't be applied, the box refuses to start.
 
 ## Packages
 

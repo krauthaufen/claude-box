@@ -10,7 +10,8 @@
 #  - CWD is mounted read-write, except .claude/, .git/hooks and .git/config (read-only).
 #  - Files @imported by the global CLAUDE.md are mounted read-only.
 #  - No capabilities, no-new-privileges, no sudo, no docker socket, no other host paths.
-#  - Full internet access (default bridge network).
+#  - Full internet access; LAN/private ranges blocked per ~/.config/claude-box/network
+#    (applied by the entrypoint as root, which then drops all capabilities).
 set -euo pipefail
 
 SRC="${BASH_SOURCE[0]}"; while [[ -L "$SRC" ]]; do l="$(readlink "$SRC")"; [[ "$l" == /* ]] && SRC="$l" || SRC="$(dirname "$SRC")/$l"; done
@@ -23,6 +24,9 @@ CONF_DIR="${CLAUDE_BOX_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/claude-box}"
 PKG_FILE="$CONF_DIR/packages"; SETUP_FILE="$CONF_DIR/setup.sh"
 [[ -f "$PKG_FILE" ]] || { mkdir -p "$CONF_DIR"; cp "$REPO/packages.default" "$PKG_FILE"; }
 PACKAGES="$(sed 's/#.*//' "$PKG_FILE" | tr -d '\r' | tr -s ' \t\n' ' ' | sed 's/^ //;s/ $//')"
+NET_FILE="$CONF_DIR/network"
+[[ -f "$NET_FILE" ]] || cp "$REPO/network.default" "$NET_FILE"
+NET_RULES="$(sed 's/#.*//' "$NET_FILE" | tr -d '\r' | grep -v '^[[:space:]]*$' || true)"
 SETUP_B64=""; if [[ -f "$SETUP_FILE" ]]; then SETUP_B64="$(base64 < "$SETUP_FILE" | tr -d '\n')"; fi
 
 # --- Claude version: match the host CLI if installed, else latest ------------
@@ -33,7 +37,7 @@ fi
 VERSION="${VERSION:-latest}"
 
 # --- Image ---------------------------------------------------------------------
-HASH="$( { cat "$REPO/Dockerfile"; printf '|%s|%s|%s' "$PACKAGES" "$SETUP_B64" "$HOME"; } | hash10)"
+HASH="$( { cat "$REPO/Dockerfile" "$REPO/entry.sh"; printf '|%s|%s|%s' "$PACKAGES" "$SETUP_B64" "$HOME"; } | hash10)"
 TAG="${CLAUDE_BOX_IMAGE:-claude-box}:${VERSION}-${U_ID}-${HASH}"
 if [[ "${1:-}" == "--box-rebuild" ]]; then shift; docker image rm -f "$TAG" >/dev/null 2>&1 || true; fi
 if ! docker image inspect "$TAG" >/dev/null 2>&1; then
@@ -120,5 +124,5 @@ done
 
 TTY=(-i); if [[ -t 0 && -t 1 ]]; then TTY=(-it); fi
 exec docker run --rm "${TTY[@]}" --hostname "$(hostname)" \
-  --cap-drop ALL --security-opt no-new-privileges --pids-limit 4096 --memory "${CLAUDE_BOX_MEMORY:-8g}" \
-  ${CLAUDE_BOX_DOCKER_ARGS:-} "${MOUNTS[@]}" ${ENVS[@]+"${ENVS[@]}"} "$TAG" "$@"
+  --cap-drop ALL --cap-add NET_ADMIN --cap-add SETUID --cap-add SETGID --cap-add SETPCAP --security-opt no-new-privileges --pids-limit 4096 --memory "${CLAUDE_BOX_MEMORY:-8g}" \
+  ${CLAUDE_BOX_DOCKER_ARGS:-} "${MOUNTS[@]}" ${ENVS[@]+"${ENVS[@]}"} -e "CLAUDE_BOX_NET=$NET_RULES" "$TAG" "$@"

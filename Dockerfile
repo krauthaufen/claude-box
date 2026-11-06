@@ -6,7 +6,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80retries \
  && for i in 1 2 3 4 5; do apt-get update && apt-get install -y --no-install-recommends ca-certificates && break; sleep 2; done \
  && sed -i 's|http://|https://|g' /etc/apt/sources.list.d/debian.sources \
- && apt-get update && apt-get install -y --no-install-recommends curl git locales tini $PACKAGES \
+ && apt-get update && apt-get install -y --no-install-recommends curl git locales tini iptables $PACKAGES \
  && sed -i 's/# en_US.UTF-8/en_US.UTF-8/' /etc/locale.gen && locale-gen \
  && rm -rf /var/lib/apt/lists/*
 RUN git config --system safe.directory "*"
@@ -20,4 +20,8 @@ ENV HOME=$HOMEDIR PATH=$HOMEDIR/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/s
     LANG=en_US.UTF-8 DISABLE_AUTOUPDATER=1 IS_SANDBOX=1
 RUN curl -fsSL https://claude.ai/install.sh | bash -s -- "$VERSION" \
  && rm -rf "$HOMEDIR/.claude" "$HOMEDIR/.claude.json" && claude --version
-ENTRYPOINT ["/usr/bin/tini", "--", "claude"]
+USER root
+ENV BOX_UID=$UID BOX_GID=$GID
+COPY entry.sh /usr/local/bin/claude-box-entry
+RUN chmod 755 /usr/local/bin/claude-box-entry
+ENTRYPOINT ["/usr/local/bin/claude-box-entry"]

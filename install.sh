@@ -7,5 +7,6 @@ mkdir -p "$HOME/.local/bin"
 ln -sf "$REPO/claude-box" "$HOME/.local/bin/claude-box"
 CONF="${XDG_CONFIG_HOME:-$HOME/.config}/claude-box"; mkdir -p "$CONF"
 [[ -f "$CONF/packages" ]] || cp "$REPO/packages.default" "$CONF/packages"
-echo "installed: ~/.local/bin/claude-box   packages: $CONF/packages"
+[[ -f "$CONF/network" ]] || cp "$REPO/network.default" "$CONF/network"
+echo "installed: ~/.local/bin/claude-box   config: $CONF/{packages,network}"
 case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) echo "note: add ~/.local/bin to your PATH";; esac
