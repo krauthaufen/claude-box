@@ -6,7 +6,9 @@ No Claude install is needed on the host. All arguments pass through (`claude-box
 
 ## Install
 
-Requires Docker (Linux) or Docker Desktop (macOS, Windows).
+Requires Docker: [Docker Desktop for Windows](https://docs.docker.com/desktop/setup/install/windows-install/),
+[Docker Desktop for macOS](https://docs.docker.com/desktop/setup/install/mac-install/),
+or [Docker Engine on Linux](https://docs.docker.com/engine/install/).
 
 ```sh
 git clone https://github.com/krauthaufen/claude-box ~/claude-box && ~/claude-box/install.sh   # Linux / macOS
