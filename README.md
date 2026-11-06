@@ -19,6 +19,31 @@ git clone <repo> %USERPROFILE%\claude-box
 Then run `claude-box` in a project dir. The first run builds the image (a few minutes).
 Log in once inside the box with `/login`, or pass `ANTHROPIC_API_KEY`. The box keeps its own credentials.
 
+## Make it a global command
+
+The installers already put `claude-box` on your PATH, for your user only:
+
+- **Linux / macOS**: `install.sh` symlinks it into `~/.local/bin`. If that dir isn't on your PATH yet:
+  `echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc` (or `~/.zshrc` on macOS), then open a new shell.
+- **Windows**: `install.cmd` adds the repo folder to your user PATH. Open a new terminal afterwards.
+  `claude-box` then works in cmd, PowerShell and Windows Terminal.
+
+For **all users** on a machine (needs admin rights):
+
+```sh
+sudo git clone <repo> /opt/claude-box && sudo ln -s /opt/claude-box/claude-box /usr/local/bin/claude-box
+```
+```bat
+:: elevated cmd
+git clone <repo> "C:\Program Files\claude-box"
+setx /M PATH "%PATH%;C:\Program Files\claude-box"
+```
+
+Each user still gets their own image, config copy and login. Update with `git pull` in the repo dir.
+
+To make plain `claude` always run boxed, add an alias:
+`alias claude=claude-box` in `~/.bashrc` / `~/.zshrc`, or `Set-Alias claude claude-box` in your PowerShell `$PROFILE`.
+
 ## What the box can and cannot touch
 
 | | access |
