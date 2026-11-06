@@ -1,19 +1,29 @@
 #!/usr/bin/env bash
-# claude-box — run Claude Code inside a Docker container (Linux / macOS).
-# Only the current directory and the Claude config dirs are mounted, at their real
-# host paths, so sessions / --resume / --continue are shared with the host CLI.
+# claude-box — run Claude Code isolated in a Docker container (Linux / macOS).
+#
+# Isolation model: nothing the container writes can be executed by the host afterwards.
+#  - The box has its OWN config dir (private state), mounted at the host config path.
+#    Host CLAUDE.md / settings / skills / agents / commands / plugins are COPIED in on every
+#    launch, so edits inside the box never reach the host.
+#  - Shared writable with the host = data only: projects/ (sessions + memory, for --resume /
+#    --continue), history.jsonl, file-history/, todos/.
+#  - CWD is mounted read-write, except .claude/, .git/hooks and .git/config (read-only).
+#  - Files @imported by the global CLAUDE.md are mounted read-only.
+#  - No capabilities, no-new-privileges, no sudo, no docker socket, no other host paths.
+#  - Full internet access (default bridge network).
 set -euo pipefail
 
 SRC="${BASH_SOURCE[0]}"; while [[ -L "$SRC" ]]; do l="$(readlink "$SRC")"; [[ "$l" == /* ]] && SRC="$l" || SRC="$(dirname "$SRC")/$l"; done
 REPO="$(cd "$(dirname "$SRC")" && pwd -P)"
 U_ID="$(id -u)"; G_ID="$(id -g)"; U_NAME="$(id -un)"
+hash10() { (sha256sum 2>/dev/null || shasum -a 256) | cut -c1-10; }
 
-# --- Config: global package list + optional root setup script ----------------
+# --- Global package list + optional root setup script (build time only) -------
 CONF_DIR="${CLAUDE_BOX_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/claude-box}"
 PKG_FILE="$CONF_DIR/packages"; SETUP_FILE="$CONF_DIR/setup.sh"
 [[ -f "$PKG_FILE" ]] || { mkdir -p "$CONF_DIR"; cp "$REPO/packages.default" "$PKG_FILE"; }
 PACKAGES="$(sed 's/#.*//' "$PKG_FILE" | tr -d '\r' | tr -s ' \t\n' ' ' | sed 's/^ //;s/ $//')"
-SETUP_B64=""; [[ -f "$SETUP_FILE" ]] && SETUP_B64="$(base64 < "$SETUP_FILE" | tr -d '\n')"
+SETUP_B64=""; if [[ -f "$SETUP_FILE" ]]; then SETUP_B64="$(base64 < "$SETUP_FILE" | tr -d '\n')"; fi
 
 # --- Claude version: match the host CLI if installed, else latest ------------
 VERSION="${CLAUDE_BOX_VERSION:-}"
@@ -22,8 +32,8 @@ if [[ -z "$VERSION" ]] && command -v claude >/dev/null 2>&1; then
 fi
 VERSION="${VERSION:-latest}"
 
-# --- Image: one tag per (version, user, Dockerfile+packages+setup) -----------
-HASH="$( { cat "$REPO/Dockerfile"; printf '|%s|%s|%s' "$PACKAGES" "$SETUP_B64" "$HOME"; } | (sha256sum 2>/dev/null || shasum -a 256) | cut -c1-10)"
+# --- Image ---------------------------------------------------------------------
+HASH="$( { cat "$REPO/Dockerfile"; printf '|%s|%s|%s' "$PACKAGES" "$SETUP_B64" "$HOME"; } | hash10)"
 TAG="${CLAUDE_BOX_IMAGE:-claude-box}:${VERSION}-${U_ID}-${HASH}"
 if [[ "${1:-}" == "--box-rebuild" ]]; then shift; docker image rm -f "$TAG" >/dev/null 2>&1 || true; fi
 if ! docker image inspect "$TAG" >/dev/null 2>&1; then
@@ -34,47 +44,81 @@ if ! docker image inspect "$TAG" >/dev/null 2>&1; then
     --build-arg PACKAGES="$PACKAGES" --build-arg SETUP_B64="$SETUP_B64" "$REPO" >&2
 fi
 
-# --- Mounts: CWD + config dirs at identical paths ----------------------------
-CWD="$(pwd -P)"
-MOUNTS=(-w "$CWD"); SEEN="|"
-add_mount() { [[ -e "$1" && "$SEEN" != *"|$1|"* ]] || return 0; SEEN="$SEEN$1|"; MOUNTS+=(-v "$1:$1"); }
-add_mount "$CWD"
-if [[ -n "${CLAUDE_CONFIG_DIR:-}" ]]; then
-  CFG="$CLAUDE_CONFIG_DIR"; mkdir -p "$CFG"; MOUNTS+=(-e "CLAUDE_CONFIG_DIR=$CFG")
-else
-  CFG="$HOME/.claude"; mkdir -p "$CFG"
-  [[ -e "$HOME/.claude.json" ]] || echo '{}' > "$HOME/.claude.json"
-  add_mount "$HOME/.claude.json"
-fi
-add_mount "$CFG"
-for e in "$CFG"/* "$CFG"/.[!.]*; do   # follow top-level symlinks leaving the config dir
-  [[ -L "$e" ]] || continue
-  t="$(readlink -f "$e" 2>/dev/null)" || continue
-  [[ "$t" == "$CFG"/* ]] || add_mount "$t"
+# --- Config: host config path + box-private state dir --------------------------
+if [[ -n "${CLAUDE_CONFIG_DIR:-}" ]]; then CFG="$CLAUDE_CONFIG_DIR"; HJSON="$CFG/.claude.json"
+else CFG="$HOME/.claude"; HJSON="$HOME/.claude.json"; fi
+mkdir -p "$CFG"
+STATE="${CLAUDE_BOX_STATE:-${XDG_STATE_HOME:-$HOME/.local/state}/claude-box}/$(printf '%s' "$CFG" | hash10)"
+BOXCFG="$STATE/config"
+mkdir -p "$BOXCFG"
+# Serialize seeding/refresh between concurrently starting launchers (mkdir is atomic).
+LOCK="$BOXCFG/.launch.lock"; n=0
+until mkdir "$LOCK" 2>/dev/null; do
+  n=$((n+1)); if (( n > 300 )); then rm -rf "$LOCK"; n=0; fi   # stale after ~30s
+  sleep 0.1
 done
-# files pulled in by the global CLAUDE.md (@/abs or @~/ imports) and a custom autoMemoryDirectory
+trap 'rm -rf "$LOCK"' EXIT
+# box-private .claude.json, seeded once from the host (never written back). It lives inside the
+# config dir (CLAUDE_CONFIG_DIR is always set in the box) so Claude's own lock is shared by boxes.
+if [[ ! -s "$BOXCFG/.claude.json" ]]; then
+  if [[ -f "$HJSON" ]]; then cp "$HJSON" "$BOXCFG/.claude.json.seed"; else echo '{}' > "$BOXCFG/.claude.json.seed"; fi
+  mv -f "$BOXCFG/.claude.json.seed" "$BOXCFG/.claude.json"
+fi
+# refresh copies of host instructions/settings/extensions (box edits are discarded);
+# copy-then-swap so already running boxes never see a half-copied tree
+for item in CLAUDE.md settings.json settings.local.json keybindings.json skills agents commands rules output-styles plugins; do
+  tmp="$BOXCFG/.incoming-$item"; old="$BOXCFG/.old-$item"; rm -rf "$tmp" "$old"
+  if [[ -e "$CFG/$item" ]]; then cp -RL "$CFG/$item" "$tmp" 2>/dev/null || true; fi
+  if [[ -e "$BOXCFG/$item" ]]; then mv "$BOXCFG/$item" "$old"; fi
+  if [[ -e "$tmp" ]]; then mv "$tmp" "$BOXCFG/$item"; fi
+  rm -rf "$old"
+done
+rm -rf "$LOCK"; trap - EXIT
+# shared data (real dirs, resolved through symlinks)
+SHARED=()
+for d in projects file-history todos; do
+  [[ -e "$CFG/$d" ]] || mkdir -p "$CFG/$d"
+  SHARED+=(-v "$(cd "$CFG/$d" && pwd -P):$CFG/$d")
+done
+H="$CFG/history.jsonl"; [[ -e "$H" ]] || : > "$H"
+SHARED+=(-v "$(cd "$(dirname "$(readlink -f "$H")")" && pwd -P)/$(basename "$(readlink -f "$H")"):$CFG/history.jsonl")
+
+MOUNTS=(-v "$BOXCFG:$CFG" -e "CLAUDE_CONFIG_DIR=$CFG")
+MOUNTS+=("${SHARED[@]}")
+
+# --- CWD, with host-executed bits read-only --------------------------------------
+CWD="$(pwd -P)"
+case "$CWD" in "$HOME"|/) echo "claude-box: refusing to mount $CWD as the project dir" >&2; exit 1;; esac
+MOUNTS+=(-v "$CWD:$CWD" -w "$CWD")
+mkdir -p "$CWD/.claude"; MOUNTS+=(-v "$CWD/.claude:$CWD/.claude:ro")
+if [[ -d "$CWD/.git" ]]; then
+  mkdir -p "$CWD/.git/hooks"; MOUNTS+=(-v "$CWD/.git/hooks:$CWD/.git/hooks:ro")
+  if [[ -f "$CWD/.git/config" ]]; then MOUNTS+=(-v "$CWD/.git/config:$CWD/.git/config:ro"); fi
+fi
+for f in .mcp.json CLAUDE.local.md .envrc; do
+  if [[ -f "$CWD/$f" ]]; then MOUNTS+=(-v "$CWD/$f:$CWD/$f:ro"); fi
+done
+# files imported by the global CLAUDE.md (@/abs or @~/...): read-only, single files only
 for md in "$CFG"/CLAUDE.md "$CFG"/rules/*.md; do
   [[ -f "$md" ]] || continue
   while IFS= read -r imp; do
     imp="${imp#@}"; imp="${imp/#\~/$HOME}"
-    if [[ -e "$imp" ]]; then add_mount "$(cd "$(dirname "$imp")" && pwd -P)/$(basename "$imp")"; fi
+    if [[ -f "$imp" ]]; then MOUNTS+=(-v "$(readlink -f "$imp"):$imp:ro"); fi
   done < <(grep -oE '(^|[[:space:]])@(~|/)[^[:space:]]+' "$md" | sed 's/^[[:space:]]*//' || true)
 done
-for sf in "$CFG/settings.json" "$CFG/settings.local.json"; do
-  [[ -f "$sf" ]] || continue
-  amd="$(sed -nE 's/.*"autoMemoryDirectory"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' "$sf" | head -1)"
-  if [[ -n "$amd" ]]; then amd="${amd/#\~/$HOME}"; mkdir -p "$amd"; add_mount "$amd"; fi
+for extra in ${CLAUDE_BOX_MOUNTS:-}; do   # explicit opt-in, always read-only
+  if [[ -e "$extra" ]]; then MOUNTS+=(-v "$extra:$extra:ro"); fi
 done
-for extra in ${CLAUDE_BOX_MOUNTS:-}; do add_mount "$extra"; done
 
 # --- Env passthrough ---------------------------------------------------------
 ENVS=()
 for v in TERM COLORTERM TZ ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN ANTHROPIC_BASE_URL ANTHROPIC_MODEL \
-         CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX AWS_REGION AWS_PROFILE CLOUD_ML_REGION \
+         CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX AWS_REGION CLOUD_ML_REGION \
          ANTHROPIC_VERTEX_PROJECT_ID HTTP_PROXY HTTPS_PROXY NO_PROXY ${CLAUDE_BOX_ENV:-}; do
   if [[ -n "${!v:-}" ]]; then ENVS+=(-e "$v=${!v}"); fi
 done
 
-TTY=(-i); [[ -t 0 && -t 1 ]] && TTY=(-it)
+TTY=(-i); if [[ -t 0 && -t 1 ]]; then TTY=(-it); fi
 exec docker run --rm "${TTY[@]}" --hostname "$(hostname)" \
+  --cap-drop ALL --security-opt no-new-privileges --pids-limit 4096 --memory "${CLAUDE_BOX_MEMORY:-8g}" \
   ${CLAUDE_BOX_DOCKER_ARGS:-} "${MOUNTS[@]}" ${ENVS[@]+"${ENVS[@]}"} "$TAG" "$@"

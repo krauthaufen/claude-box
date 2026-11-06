@@ -1,0 +1,4 @@
+# Runs as root at image build time. Example: .NET SDK 8 + 10 (not in Debian's apt).
+curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh
+for ch in 8.0 10.0; do bash /tmp/dotnet-install.sh --channel $ch --install-dir /usr/share/dotnet; done
+ln -sf /usr/share/dotnet/dotnet /usr/local/bin/dotnet

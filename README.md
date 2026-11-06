@@ -1,59 +1,58 @@
 # claude-box
 
-Run the Claude Code CLI inside a Docker container. The container sees **only** the current
-directory and your Claude config (global `CLAUDE.md`, settings, skills, agents, auto-memory,
-sessions, credentials). Everything else on the host is invisible. All CLI arguments pass
-straight through, so `claude-box --resume`, `claude-box -c`, `claude-box -p "..."` behave like `claude`.
+Run the Claude Code CLI isolated in a Docker container, as a lighter alternative to a desktop VM.
+No Claude install is needed on the host. Arguments pass straight through, so `claude-box --resume`,
+`claude-box -c` and `claude-box -p "..."` behave like `claude`.
 
 ## Setup
 
-Needs Docker (Linux), Docker Desktop (macOS / Windows, Linux containers).
+Needs Docker (Linux) or Docker Desktop (macOS, Windows). Then:
 
 ```sh
-git clone <this repo> ~/claude-box && ~/claude-box/install.sh          # Linux / macOS
+git clone <repo> ~/claude-box && ~/claude-box/install.sh            # Linux / macOS
 ```
-```powershell
-git clone <this repo> $HOME\claude-box; & $HOME\claude-box\install.ps1  # Windows
+```bat
+git clone <repo> %USERPROFILE%\claude-box
+%USERPROFILE%\claude-box\install.cmd                                 :: Windows
 ```
 
-The first run builds the image (a few minutes). After that it starts instantly.
+Then run `claude-box` in a project dir. The first run builds the image (a few minutes).
+Log in once inside the box with `/login`, or pass `ANTHROPIC_API_KEY`. The box keeps its own credentials.
 
-## How it works
+## What the box can and cannot touch
 
-- **Same CLI version**: the image installs the version `claude --version` reports on the host
-  (or `latest` if there's no host CLI). Auto-update is off inside the container. When the host CLI
-  updates, the next run builds a matching image.
-- **Same paths** (Linux/macOS): CWD and config are mounted at their real host paths, and the
-  container user has your uid/gid/home, so session files and memory are shared 1:1 with the host CLI.
-- **Windows**: `C:\Users\me\proj` shows up as `/c/Users/me/proj`. The project's session/memory dir
-  (`projects\C--Users-me-proj`) is mounted over the container's name for it, so `--resume`/`--continue`
-  still share sessions with native Windows `claude`.
-- Config: `~/.claude` + `~/.claude.json`, or `$CLAUDE_CONFIG_DIR` if set. Top-level symlinks in the
-  config dir, `@/abs` / `@~/` imports in the global `CLAUDE.md`, and a custom `autoMemoryDirectory`
-  are followed and mounted too (Linux/macOS).
-- The user has passwordless `sudo` inside the container. Changes vanish when it exits (`--rm`).
-
-## Global package list
-
-`~/.config/claude-box/packages` (Windows: `%APPDATA%\claude-box\packages`) lists the Debian apt
-packages in every container. Edit it and the next run rebuilds automatically.
-For anything apt can't do, put a script at `setup.sh` next to it. It runs as root at build time.
-
-## Knobs (env vars)
-
-| var | effect |
+| | access |
 |---|---|
-| `CLAUDE_BOX_MOUNTS` | extra host paths to mount (space-separated; `;` on Windows) |
-| `CLAUDE_BOX_ENV` | extra env var names to pass through |
-| `CLAUDE_BOX_DOCKER_ARGS` | extra `docker run` args, e.g. `--network none` or `--gpus all` |
-| `CLAUDE_BOX_VERSION` | pin a Claude Code version |
-| `CLAUDE_BOX_CONFIG` | alternative dir for `packages` / `setup.sh` |
+| current directory | read-write, except `.claude/`, `.git/hooks`, `.git/config`, `.mcp.json`, `.envrc` (read-only) |
+| sessions, auto-memory (`projects/`), `history.jsonl`, `file-history/`, `todos/` | read-write, shared with host `claude` |
+| global `CLAUDE.md`, settings, skills, agents, commands, rules, plugins | **copied** in fresh every launch; box edits are discarded |
+| files `@imported` by the global `CLAUDE.md` | read-only |
+| everything else on the host | not mounted |
+| internet | full access |
 
-`claude-box --box-rebuild ...` forces an image rebuild. Old images: `docker image prune` / `docker rmi claude-box:<tag>`.
+Principle: nothing the box writes is executed by the host afterwards, e.g. no planted hooks,
+MCP servers or git hooks. The container runs as your uid, with all capabilities dropped,
+`no-new-privileges`, no sudo, no docker socket, and pid and memory limits.
 
-## Caveats
+What remains is inherent to sharing a writable project: code the agent writes (Makefile,
+package.json scripts, tests) runs on the host only if *you* run it there. Review diffs as you would a contributor's PR.
 
-- Hooks, MCP servers and status lines in your settings that point at host-only programs or paths
-  will fail inside the container. Mount them or add the tools via `packages`/`setup.sh`.
-- Only CWD is mounted. Running from a repo subdirectory hides the repo's `.git`, so run from the repo root.
-- Claude's own Bash sandbox (bubblewrap) doesn't work inside Docker. The container is the sandbox.
+## Packages / build tools
+
+- `~/.config/claude-box/packages` (Windows: `%APPDATA%\claude-box\packages`): Debian apt packages, one list for every box.
+- `setup.sh` in the same dir: runs as root at image build, for anything apt lacks.
+  See `setup.sh.example` (.NET 8 + 10 SDKs, plus `libicu76` in packages).
+
+Editing either file triggers a rebuild on the next run. `claude-box --box-rebuild` forces one.
+
+## Notes
+
+- The box's Claude version matches the host `claude` if one is installed, else `latest`.
+  Pin it with `CLAUDE_BOX_VERSION`.
+- Concurrent boxes in the same or different projects are fine.
+- Windows: `C:\Users\me\proj` appears as `/c/Users/me/proj` inside. Sessions still share the
+  native `projects\C--Users-me-proj` dir.
+- Hooks, MCP servers and status lines in your settings that call host-only programs won't work in the box.
+- Run from the repo root, since only the CWD is mounted.
+- Env knobs: `CLAUDE_BOX_ENV` (extra env var names), `CLAUDE_BOX_MOUNTS` (extra read-only paths),
+  `CLAUDE_BOX_DOCKER_ARGS`, `CLAUDE_BOX_MEMORY` (default 8g).
