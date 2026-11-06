@@ -36,7 +36,7 @@ sudo git clone <repo> /opt/claude-box && sudo ln -s /opt/claude-box/claude-box /
 ```bat
 :: elevated cmd
 git clone <repo> "C:\Program Files\claude-box"
-setx /M PATH "%PATH%;C:\Program Files\claude-box"
+powershell -c "[Environment]::SetEnvironmentVariable('Path', [Environment]::GetEnvironmentVariable('Path','Machine') + ';C:\Program Files\claude-box', 'Machine')"
 ```
 
 Each user still gets their own image, config copy and login. Update with `git pull` in the repo dir.
