@@ -1,4 +1,10 @@
-# Runs as root at image build time. Example: .NET SDK 8 + 10 (not in Debian's apt).
-curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh
-for ch in 8.0 10.0; do bash /tmp/dotnet-install.sh --channel $ch --install-dir /usr/share/dotnet; done
-ln -sf /usr/share/dotnet/dotnet /usr/local/bin/dotnet
+# claude-box setup.sh: runs as root at image build time (Debian 13).
+# Copy to ~/.config/claude-box/setup.sh (Windows: %APPDATA%\claude-box\setup.sh) to use it.
+#
+# .NET SDKs 8 and 10 from Microsoft's official, signed apt repository.
+# Keep only the SDK lines you need. Patch updates arrive with each image rebuild.
+curl -fsSL https://packages.microsoft.com/config/debian/13/packages-microsoft-prod.deb -o /tmp/ms.deb
+dpkg -i /tmp/ms.deb && rm /tmp/ms.deb
+apt-get update
+apt-get install -y --no-install-recommends dotnet-sdk-8.0 dotnet-sdk-10.0
+rm -rf /var/lib/apt/lists/*

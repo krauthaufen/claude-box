@@ -58,9 +58,20 @@ If they can't be applied, the box refuses to start.
 ## Packages
 
 - `~/.config/claude-box/packages` (Windows: `%APPDATA%\claude-box\packages`): apt packages for every box.
-- `setup.sh` in the same folder runs as root at build time, for anything else. See `setup.sh.example` (.NET SDKs).
+- `setup.sh` in the same folder runs as root at build time, for anything apt doesn't have.
 
 Changing either rebuilds the image on the next run. `claude-box --box-rebuild` forces a rebuild.
+
+### .NET 8 / 10
+
+Install the official SDKs from Microsoft's apt repository:
+
+```sh
+cp ~/claude-box/setup.sh.example ~/.config/claude-box/setup.sh                    # Linux / macOS
+copy %USERPROFILE%\claude-box\setup.sh.example %APPDATA%\claude-box\setup.sh    :: Windows
+```
+
+The example installs both SDKs side by side. Delete the one you don't need. Run `claude-box --box-rebuild` from time to time to pick up .NET patch releases.
 
 ## Notes
 
