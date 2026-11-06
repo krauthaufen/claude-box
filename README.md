@@ -59,8 +59,16 @@ Principle: nothing the box writes is executed by the host afterwards, e.g. no pl
 MCP servers or git hooks. The container runs as your uid, with all capabilities dropped,
 `no-new-privileges`, no sudo, no docker socket, and pid and memory limits.
 
-What remains is inherent to sharing a writable project: code the agent writes (Makefile,
-package.json scripts, tests) runs on the host only if *you* run it there. Review diffs as you would a contributor's PR.
+### What it does NOT protect against
+
+**claude-box does not stop the agent from writing malicious or broken code into your repo.**
+The project folder is writable on purpose, since that's the agent's job. Anything it changes there,
+such as source files, build scripts, Makefiles, `package.json` scripts, test files, CI configs or
+dependencies, runs on your machine the moment you build, test or run the project outside the box.
+The same goes for anyone who pulls your pushed commits.
+
+The box keeps the agent from touching your *machine* directly. It does not make its *output* trustworthy.
+Review diffs (`git diff`) before you build, run or push, as you would a PR from an unknown contributor.
 
 ## Packages / build tools
 
