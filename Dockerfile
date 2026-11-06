@@ -18,8 +18,13 @@ RUN (getent group "$GID" >/dev/null || groupadd -g "$GID" "$UNAME") \
 USER $UID:$GID
 ENV HOME=$HOMEDIR PATH=$HOMEDIR/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     LANG=en_US.UTF-8 DISABLE_AUTOUPDATER=1 IS_SANDBOX=1
-RUN curl -fsSL https://claude.ai/install.sh | bash -s -- "$VERSION" \
- && rm -rf "$HOMEDIR/.claude" "$HOMEDIR/.claude.json" && claude --version
+# Retry: flaky networks drop or corrupt downloads (the installer verifies the binary's checksum).
+RUN for i in 1 2 3 4 5; do \
+      curl -fsSL --retry 5 --retry-all-errors https://claude.ai/install.sh -o /tmp/install.sh \
+      && bash /tmp/install.sh "$VERSION" && break; \
+      echo "claude install failed (attempt $i), retrying..." >&2; sleep $((i * 5)); \
+    done \
+ && rm -rf /tmp/install.sh "$HOMEDIR/.claude" "$HOMEDIR/.claude.json" && claude --version
 USER root
 ENV BOX_UID=$UID BOX_GID=$GID
 COPY entry.sh /usr/local/bin/claude-box-entry

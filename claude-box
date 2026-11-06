@@ -42,10 +42,14 @@ TAG="${CLAUDE_BOX_IMAGE:-claude-box}:${VERSION}-${U_ID}-${HASH}"
 if [[ "${1:-}" == "--box-rebuild" ]]; then shift; docker image rm -f "$TAG" >/dev/null 2>&1 || true; fi
 if ! docker image inspect "$TAG" >/dev/null 2>&1; then
   echo "claude-box: building image $TAG (one-time, a few minutes)..." >&2
-  docker build -t "$TAG" -f "$REPO/Dockerfile" \
-    --build-arg UID="$U_ID" --build-arg GID="$G_ID" --build-arg UNAME="$U_NAME" \
-    --build-arg HOMEDIR="$HOME" --build-arg VERSION="$VERSION" \
-    --build-arg PACKAGES="$PACKAGES" --build-arg SETUP_B64="$SETUP_B64" "$REPO" >&2
+  for attempt in 1 2 3; do   # finished layers are cached, so a retry only redoes the failed step
+    if docker build -t "$TAG" -f "$REPO/Dockerfile" \
+      --build-arg UID="$U_ID" --build-arg GID="$G_ID" --build-arg UNAME="$U_NAME" \
+      --build-arg HOMEDIR="$HOME" --build-arg VERSION="$VERSION" \
+      --build-arg PACKAGES="$PACKAGES" --build-arg SETUP_B64="$SETUP_B64" "$REPO" >&2; then break; fi
+    if (( attempt == 3 )); then echo "claude-box: image build failed" >&2; exit 1; fi
+    echo "claude-box: build failed (attempt $attempt), retrying..." >&2; sleep 5
+  done
 fi
 
 # --- Config: host config path + box-private state dir --------------------------

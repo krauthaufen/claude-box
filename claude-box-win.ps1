@@ -47,10 +47,14 @@ if ($Rest.Count -gt 0 -and $Rest[0] -eq '--box-rebuild') { $Rest = $Rest[1..($Re
 & docker image inspect $Tag 2>$null | Out-Null
 if ($LASTEXITCODE -ne 0) {
   [Console]::Error.WriteLine("claude-box: building image $Tag (one-time, a few minutes)...")
-  & docker build -t $Tag -f (Join-Path $Repo 'Dockerfile') `
-    --build-arg UID=1000 --build-arg GID=1000 --build-arg UNAME=$UName --build-arg HOMEDIR=$CHome `
-    --build-arg VERSION=$Version --build-arg "PACKAGES=$Packages" --build-arg "SETUP_B64=$SetupB64" $Repo
-  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+  for ($attempt = 1; $attempt -le 3; $attempt++) {   # finished layers are cached, so a retry only redoes the failed step
+    & docker build -t $Tag -f (Join-Path $Repo 'Dockerfile') `
+      --build-arg UID=1000 --build-arg GID=1000 --build-arg UNAME=$UName --build-arg HOMEDIR=$CHome `
+      --build-arg VERSION=$Version --build-arg "PACKAGES=$Packages" --build-arg "SETUP_B64=$SetupB64" $Repo
+    if ($LASTEXITCODE -eq 0) { break }
+    if ($attempt -eq 3) { [Console]::Error.WriteLine('claude-box: image build failed'); exit 1 }
+    [Console]::Error.WriteLine("claude-box: build failed (attempt $attempt), retrying..."); Start-Sleep 5
+  }
 }
 
 # --- Config: host config + box-private state -------------------------------------
