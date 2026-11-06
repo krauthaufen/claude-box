@@ -1,0 +1,7 @@
+# Debian (trixie) apt packages installed in every claude-box container.
+# Whitespace/newline separated, '#' comments allowed. Editing this triggers a rebuild.
+wget ripgrep jq less procps file unzip zip xz-utils
+python3 python3-pip python3-venv
+build-essential
+nodejs npm
+openssh-client
