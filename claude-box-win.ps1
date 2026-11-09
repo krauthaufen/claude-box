@@ -137,6 +137,16 @@ if ($env:CLAUDE_BOX_ENV) { $Vars += ($env:CLAUDE_BOX_ENV -split '[ ;]') }
 foreach ($v in $Vars) { $val = [Environment]::GetEnvironmentVariable($v); if ($v -and $val) { $DArgs += @('-e', "$v=$val") } }
 $DArgs += @('-e', 'TERM=xterm-256color')
 
+# Line endings: Git for Windows usually has core.autocrlf=true (CRLF on disk, LF in the repo).
+# Give git in the box the host's effective setting for this folder, or it sees every file as modified.
+$GitCfg = @{}
+if (Get-Command git -ErrorAction SilentlyContinue) {
+  foreach ($k in 'core.autocrlf','core.eol') { $v = (& git -C $Cwd config --get $k 2>$null); if ($v) { $GitCfg[$k] = "$v".Trim() } }
+} else { $GitCfg['core.autocrlf'] = 'true' }
+$i = 0
+foreach ($k in $GitCfg.Keys) { $DArgs += @('-e', "GIT_CONFIG_KEY_$i=$k", '-e', "GIT_CONFIG_VALUE_$i=$($GitCfg[$k])"); $i++ }
+if ($i -gt 0) { $DArgs += @('-e', "GIT_CONFIG_COUNT=$i") }
+
 $Tty = if ([Console]::IsInputRedirected -or [Console]::IsOutputRedirected) { '-i' } else { '-it' }
 $Extra = @(); if ($env:CLAUDE_BOX_DOCKER_ARGS) { $Extra = $env:CLAUDE_BOX_DOCKER_ARGS -split '\s+' }
 $Mem = if ($env:CLAUDE_BOX_MEMORY) { $env:CLAUDE_BOX_MEMORY } else { '8g' }

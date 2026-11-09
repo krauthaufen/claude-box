@@ -126,6 +126,16 @@ for v in TERM COLORTERM TZ ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN ANTHROPIC_BASE
   if [[ -n "${!v:-}" ]]; then ENVS+=(-e "$v=${!v}"); fi
 done
 
+# Line endings: pass the host's effective core.autocrlf / core.eol for this folder to git in the box.
+n=0
+if command -v git >/dev/null 2>&1; then
+  for k in core.autocrlf core.eol; do
+    v="$(git -C "$CWD" config --get "$k" 2>/dev/null || true)"
+    if [[ -n "$v" ]]; then ENVS+=(-e "GIT_CONFIG_KEY_$n=$k" -e "GIT_CONFIG_VALUE_$n=$v"); n=$((n+1)); fi
+  done
+fi
+if (( n > 0 )); then ENVS+=(-e "GIT_CONFIG_COUNT=$n"); fi
+
 TTY=(-i); if [[ -t 0 && -t 1 ]]; then TTY=(-it); fi
 exec docker run --rm "${TTY[@]}" --hostname "$(hostname)" \
   --cap-drop ALL --cap-add NET_ADMIN --cap-add SETUID --cap-add SETGID --cap-add SETPCAP --security-opt no-new-privileges --pids-limit 4096 --memory "${CLAUDE_BOX_MEMORY:-8g}" \
