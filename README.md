@@ -23,7 +23,9 @@ Run `claude-box` in a project folder. The first run builds the image (a few minu
 ### Global command
 
 - Linux/macOS: the installer links `claude-box` into `~/.local/bin`. Make sure that folder is on your PATH.
-- Windows: the installer adds the repo folder to your user PATH. Open a new terminal afterwards.
+- Windows: the installer adds the repo folder to your user PATH and an **Open with Claude Box** entry to
+  the Explorer right-click menu. Use [Windows Terminal](https://aka.ms/terminal): the old `cmd` console
+  garbles Claude's UI. If you install Windows Terminal later, re-run `install.cmd`. Remove everything with `install.cmd -Uninstall`.
 - All users (admin): clone to `/opt/claude-box` and `ln -s /opt/claude-box/claude-box /usr/local/bin/`,
   or on Windows clone to `C:\Program Files\claude-box` and add that folder to the machine PATH.
 - Optional: `alias claude=claude-box` (PowerShell: `Set-Alias claude claude-box`).
