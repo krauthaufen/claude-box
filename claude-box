@@ -126,10 +126,10 @@ for v in TERM COLORTERM TZ ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN ANTHROPIC_BASE
   if [[ -n "${!v:-}" ]]; then ENVS+=(-e "$v=${!v}"); fi
 done
 
-# Line endings: pass the host's effective core.autocrlf / core.eol for this folder to git in the box.
+# Git identity and line endings: pass the host's effective settings for this folder to git in the box.
 n=0
 if command -v git >/dev/null 2>&1; then
-  for k in core.autocrlf core.eol; do
+  for k in user.name user.email core.autocrlf core.eol; do
     v="$(git -C "$CWD" config --get "$k" 2>/dev/null || true)"
     if [[ -n "$v" ]]; then ENVS+=(-e "GIT_CONFIG_KEY_$n=$k" -e "GIT_CONFIG_VALUE_$n=$v"); n=$((n+1)); fi
   done

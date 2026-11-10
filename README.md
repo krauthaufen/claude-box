@@ -80,7 +80,7 @@ The example installs both SDKs side by side. Delete the one you don't need. Run 
 - The box uses the same Claude version as the host `claude` if one is installed, else the latest. Pin with `CLAUDE_BOX_VERSION`.
 - Multiple concurrent sessions are fine.
 - Windows paths appear as `/c/Users/...` inside the box. Sessions are still shared with native Windows `claude`.
-- Line endings: the box uses the host's `core.autocrlf` / `core.eol` for the folder. With Git for Windows' default `autocrlf=true`, files stay CRLF on disk and LF in the repo, like on the host.
+- Git: the box uses the host's `user.name`, `user.email`, `core.autocrlf` and `core.eol` for the folder, so commits carry your identity and CRLF checkouts (Git for Windows default `autocrlf=true`) stay clean.
 - Run it from the repo root, because only the current folder is mounted.
 - Hooks and MCP servers in your settings that call host-only programs won't work inside the box.
 - Env: `CLAUDE_BOX_ENV` (extra env var names), `CLAUDE_BOX_MOUNTS` (extra read-only paths),
