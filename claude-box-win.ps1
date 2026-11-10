@@ -43,6 +43,7 @@ $Hash = Sha ((Get-Content -Raw (Join-Path $Repo 'Dockerfile')) + (Get-Content -R
 $Image = if ($env:CLAUDE_BOX_IMAGE) { $env:CLAUDE_BOX_IMAGE } else { 'claude-box' }
 $Tag = "${Image}:$Version-1000-$Hash"
 $Rest = @($args)
+$BoxSync = $Rest -contains '--box-sync'; $Rest = @($Rest | Where-Object { $_ -ne '--box-sync' })   # opt-in fast mode
 $StateRoot = if ($env:CLAUDE_BOX_STATE) { $env:CLAUDE_BOX_STATE } else { Join-Path $env:LOCALAPPDATA 'claude-box' }
 if ($Rest.Count -gt 0 -and $Rest[0] -eq '--cleanup') {   # sync back + remove leftover fast-mode copies
   . (Join-Path $Repo 'claude-box-sync.ps1'); Invoke-BoxSyncCleanup ''; exit 0
@@ -107,7 +108,7 @@ if ($Cwd -eq $env:USERPROFILE.TrimEnd('\') -or $Cwd -match '^[A-Za-z]:$') { [Con
 $CCwd = To-Linux $Cwd
 # Fast mode: project copied into a VM volume and synced back live (see claude-box-sync.ps1).
 . (Join-Path $Repo 'claude-box-sync.ps1')
-$Sync = Enter-BoxSync $Cwd $Tag
+$Sync = Enter-BoxSync $Cwd $Tag $BoxSync
 if ($Sync) { $DArgs += @('-v', "$($Sync.Volume):$CCwd", '-w', $CCwd, '--label', "claude-box.box=$($Sync.Key)") }
 else { $DArgs += @('-v', "${Cwd}:$CCwd", '-w', $CCwd) }
 # Windows CLI names the project dir C--x, the container -c-x: share the same one.

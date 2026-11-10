@@ -5,8 +5,8 @@
 # Per project folder there is one volume, one sidecar container (no network, holds the volume for
 # Mutagen) and one Mutagen session; every box started in that folder shares them. Each launcher
 # leaves a marker (PID + start time); the last one out syncs back and removes everything. If a
-# launcher dies, the next start in that folder simply rejoins, and `claude-box --cleanup` (or the
-# prompt at the next start) syncs back and removes leftovers.
+# launcher dies, the next start in that folder simply rejoins, and `claude-box --cleanup` syncs back
+# and removes leftovers. Opt-in per start with --box-sync.
 
 $MutagenVersion = '0.18.1'
 $MutagenSha = @{   # SHA256SUMS of the official release
@@ -97,21 +97,6 @@ function Sync-Flush($s, [int]$timeoutSec) {
   return $false
 }
 
-function Measure-Tree([string]$root, [string[]]$skip) {
-  $n = 0; [long]$bytes = 0
-  $stack = New-Object System.Collections.Stack; $stack.Push((New-Object IO.DirectoryInfo $root))
-  while ($stack.Count) {
-    $d = $stack.Pop()
-    try {
-      foreach ($f in $d.EnumerateFiles()) { $n++; $bytes += $f.Length }
-      foreach ($c in $d.EnumerateDirectories()) {
-        if ($skip -notcontains $c.Name -and -not ($c.Attributes -band [IO.FileAttributes]::ReparsePoint)) { $stack.Push($c) }
-      }
-    } catch {}
-  }
-  return @($n, $bytes)
-}
-
 # Sync back and remove one project's volume, sidecar and session. Keeps everything if anything is
 # unresolved, so nothing the box wrote can get lost. Caller holds the lock.
 function Close-BoxSync($s) {
@@ -183,34 +168,24 @@ function Invoke-BoxSyncCleanup([string]$skipKey) {
 }
 
 # Returns the sync info if the project should be mounted from the VM volume, else $null.
-function Enter-BoxSync([string]$Cwd, [string]$Tag) {
-  $mode = if ($env:CLAUDE_BOX_SYNC) { $env:CLAUDE_BOX_SYNC.ToLower() } else { 'ask' }
+function Enter-BoxSync([string]$Cwd, [string]$Tag, [bool]$Want) {
   $s = New-SyncInfo (Sha $Cwd.ToLower()); $s.Path = $Cwd
 
   # leftovers from earlier sessions in other folders
   if ((Test-Path $SyncRoot) -and @(Get-ChildItem -Directory $SyncRoot | Where-Object { $_.Name -ne $s.Key }).Count) {
     $orph = @(Get-Orphans | Where-Object { $_ -and $_.Key -ne $s.Key })
-    if ($orph.Count -and $Interactive) {
-      Sync-Log 'fast-mode copies left over from earlier sessions:'
+    if ($orph.Count) {
+      Sync-Log "fast-mode copies left over from earlier sessions (run 'claude-box --cleanup' to sync back and remove them):"
       $orph | ForEach-Object { Sync-Log "  $($_.Path)" }
-      if ((Read-Host 'claude-box: sync them back and remove them now? [Y/n]') -notmatch '^(n|no)$') { Invoke-BoxSyncCleanup $s.Key }
     }
   }
 
   # (the marker dir exists exactly while a session exists, so folders never synced don't even start Mutagen)
   $join = (Test-Path $s.Dir) -and @(Get-SyncSessions "claude-box-key=$($s.Key)").Count -gt 0   # another box (or a crashed one) already syncs this folder
   if (-not $join) {
+    if (-not $Want) { return $null }
     & docker volume inspect $s.Volume 2>$null | Out-Null
     if ($LASTEXITCODE -eq 0) { Sync-Log "an unsynced copy of this folder is still in the VM; run 'claude-box --cleanup'. Starting without fast mode."; return $null }
-    if ($mode -eq 'no' -or $mode -eq 'false' -or $mode -eq '0') { return $null }
-    $skip = @(); if ($env:CLAUDE_BOX_SYNC_BUILD -ne 'yes') { $skip = @('bin', 'obj') }
-    if ($mode -ne 'yes') {
-      if (-not $Interactive) { return $null }
-      [Console]::Error.Write('claude-box: counting files... ')
-      $m = Measure-Tree $Cwd $skip
-      [Console]::Error.WriteLine(("{0:N0} files, {1:N0} MB" -f $m[0], ($m[1] / 1MB)))
-      if ((Read-Host 'claude-box: copy this folder into the VM for fast builds (synced back live)? [y/N]') -notmatch '^(y|yes)$') { return $null }
-    }
   }
 
   $lock = Lock-Sync
