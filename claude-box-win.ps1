@@ -43,6 +43,10 @@ $Hash = Sha ((Get-Content -Raw (Join-Path $Repo 'Dockerfile')) + (Get-Content -R
 $Image = if ($env:CLAUDE_BOX_IMAGE) { $env:CLAUDE_BOX_IMAGE } else { 'claude-box' }
 $Tag = "${Image}:$Version-1000-$Hash"
 $Rest = @($args)
+$StateRoot = if ($env:CLAUDE_BOX_STATE) { $env:CLAUDE_BOX_STATE } else { Join-Path $env:LOCALAPPDATA 'claude-box' }
+if ($Rest.Count -gt 0 -and $Rest[0] -eq '--cleanup') {   # sync back + remove leftover fast-mode copies
+  . (Join-Path $Repo 'claude-box-sync.ps1'); Invoke-BoxSyncCleanup ''; exit 0
+}
 if ($Rest.Count -gt 0 -and $Rest[0] -eq '--box-rebuild') { $Rest = $Rest[1..($Rest.Count)] | Where-Object { $_ -ne $null }; & docker image rm -f $Tag 2>$null | Out-Null }
 & docker image inspect $Tag 2>$null | Out-Null
 if ($LASTEXITCODE -ne 0) {
@@ -63,7 +67,6 @@ if ($LASTEXITCODE -ne 0) {
 if ($env:CLAUDE_CONFIG_DIR) { $Cfg = $env:CLAUDE_CONFIG_DIR; $CCfg = To-Linux $Cfg; $HJson = Join-Path $Cfg '.claude.json' }
 else { $Cfg = Join-Path $env:USERPROFILE '.claude'; $CCfg = "$CHome/.claude"; $HJson = Join-Path $env:USERPROFILE '.claude.json' }
 New-Item -ItemType Directory -Force $Cfg | Out-Null
-$StateRoot = if ($env:CLAUDE_BOX_STATE) { $env:CLAUDE_BOX_STATE } else { Join-Path $env:LOCALAPPDATA 'claude-box' }
 $State = Join-Path $StateRoot (Sha $Cfg)
 $BoxCfg = Join-Path $State 'config'; $BoxJson = Join-Path $BoxCfg '.claude.json'
 New-Item -ItemType Directory -Force $BoxCfg | Out-Null
@@ -102,7 +105,11 @@ $DArgs += @('-v', "${Hist}:$CCfg/history.jsonl")
 $Cwd = (Get-Location).ProviderPath.TrimEnd('\')
 if ($Cwd -eq $env:USERPROFILE.TrimEnd('\') -or $Cwd -match '^[A-Za-z]:$') { [Console]::Error.WriteLine("claude-box: refusing to mount $Cwd as the project dir"); exit 1 }
 $CCwd = To-Linux $Cwd
-$DArgs += @('-v', "${Cwd}:$CCwd", '-w', $CCwd)
+# Fast mode: project copied into a VM volume and synced back live (see claude-box-sync.ps1).
+. (Join-Path $Repo 'claude-box-sync.ps1')
+$Sync = Enter-BoxSync $Cwd $Tag
+if ($Sync) { $DArgs += @('-v', "$($Sync.Volume):$CCwd", '-w', $CCwd, '--label', "claude-box.box=$($Sync.Key)") }
+else { $DArgs += @('-v', "${Cwd}:$CCwd", '-w', $CCwd) }
 # Windows CLI names the project dir C--x, the container -c-x: share the same one.
 $HostProj = Join-Path (Join-Path $Cfg 'projects') (Escape-Project $Cwd)
 New-Item -ItemType Directory -Force $HostProj | Out-Null
@@ -151,4 +158,6 @@ $Tty = if ([Console]::IsInputRedirected -or [Console]::IsOutputRedirected) { '-i
 $Extra = @(); if ($env:CLAUDE_BOX_DOCKER_ARGS) { $Extra = $env:CLAUDE_BOX_DOCKER_ARGS -split '\s+' }
 $Mem = if ($env:CLAUDE_BOX_MEMORY) { $env:CLAUDE_BOX_MEMORY } else { '8g' }
 & docker run --rm $Tty --hostname $env:COMPUTERNAME --cap-drop ALL --cap-add NET_ADMIN --cap-add SETUID --cap-add SETGID --cap-add SETPCAP --security-opt no-new-privileges --pids-limit 4096 --memory $Mem @Extra @DArgs -e "CLAUDE_BOX_NET=$NetRules" $Tag @Rest
-exit $LASTEXITCODE
+$Rc = $LASTEXITCODE
+if ($Sync) { Exit-BoxSync $Sync }
+exit $Rc

@@ -75,6 +75,24 @@ copy %USERPROFILE%\claude-box\setup.sh.example %APPDATA%\claude-box\setup.sh    
 
 The example installs both SDKs side by side. Delete the one you don't need. Run `claude-box --box-rebuild` from time to time to pick up .NET patch releases.
 
+## Fast mode (Windows)
+
+Docker on Windows runs in a VM, and every file access from the box to `C:\` crosses into Windows and back.
+That makes file-heavy work slow: on a 1,000-file repo `git status` takes 2 s instead of 0.02 s, and searching 0.9 s instead of 0.02 s.
+(Compiling is barely affected: Aardvark.Rendering builds in 169 s through the share, 152 s in fast mode, 154 s natively.)
+At startup the launcher shows the folder's size and asks whether to copy it into the VM instead (default: no):
+
+- The copy lives in a Docker volume and is kept in two-way sync with your folder by [Mutagen](https://mutagen.io)
+  (downloaded once, checksum-pinned). Edits on either side arrive within about a second.
+- `.claude/`, `.git/hooks`, `.git/config`, `.mcp.json`, `.envrc` and `CLAUDE.local.md` are never synced back.
+- `bin/` and `obj/` stay in the VM, so build output isn't visible on Windows and is gone after the session.
+  Folders with that name that contain tracked files are synced normally. `CLAUDE_BOX_SYNC_BUILD=yes` syncs them all.
+- Boxes in the same folder share one copy. When the last one exits, everything is synced back and removed.
+  If anything can't be synced back (a conflict, an error), the copy is kept and the launcher says why.
+- After a crash or a closed window, the next start in that folder picks the copy up again, and starts elsewhere offer to clean it up.
+  `claude-box --cleanup` does that by hand.
+- `CLAUDE_BOX_SYNC=yes` / `no` skips the question. Not needed on Linux, where the box reads files directly.
+
 ## Notes
 
 - The box uses the same Claude version as the host `claude` if one is installed, else the latest. Pin with `CLAUDE_BOX_VERSION`.
