@@ -8,13 +8,12 @@ No Claude install is needed on the host. All arguments pass through (`claude-box
 
 Requires a container engine, any of:
 
-- [Podman](https://podman.io/docs/installation) (free, Apache 2.0). On Windows the installer needs no admin rights;
-  afterwards run `podman machine init` and `podman machine start` once. Rootless Podman is fine.
+- [Podman](https://podman.io/docs/installation) (free, Apache 2.0, no company-size limits). Rootless Podman is fine. See below.
 - [Rancher Desktop](https://rancherdesktop.io) (free, Apache 2.0) with the dockerd (moby) engine.
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/) (needs a paid subscription in larger companies)
   or [Docker Engine on Linux](https://docs.docker.com/engine/install/).
 
-claude-box uses `docker` if it's installed, else `podman`. If both are installed, it uses the one that's running.
+claude-box uses `docker` if it's installed, else `podman`. If both are installed, it uses the one that's running (Podman if neither is).
 `CLAUDE_BOX_ENGINE=podman` forces one.
 
 ```sh
@@ -24,6 +23,17 @@ git clone https://github.com/krauthaufen/claude-box ~/claude-box && ~/claude-box
 git clone https://github.com/krauthaufen/claude-box %USERPROFILE%\claude-box
 %USERPROFILE%\claude-box\install.cmd                                                              :: Windows
 ```
+
+### Podman on Windows / macOS
+
+Podman runs its containers in a small Linux VM (on Windows: a WSL2 distro). Set it up once:
+
+1. Install Podman (Windows: the `.msi` from the [releases page](https://github.com/containers/podman/releases) installs per user, no admin needed).
+2. Open a new terminal, so `podman` is on the PATH.
+3. Run `podman machine init`. On Windows this needs WSL2; if it's missing, Podman offers to install it,
+   which needs admin rights and a reboot.
+
+claude-box starts the VM itself when it isn't running (e.g. after a reboot). Linux needs none of this.
 
 Run `claude-box` in a project folder. The first run builds the image (a few minutes), then log in once with `/login`.
 

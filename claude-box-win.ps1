@@ -21,15 +21,28 @@ $Docker = $env:CLAUDE_BOX_ENGINE
 if (-not $Docker) {
   $found = @('docker','podman' | Where-Object { Get-Command $_ -ErrorAction SilentlyContinue })
   $Docker = $found | Select-Object -First 1
-  if ($found.Count -gt 1) {   # both installed: take the one that is running
+  if ($found.Count -gt 1) {   # both installed: take the one that is running, else podman (we can start it)
+    $Docker = 'podman'
     foreach ($e in $found) { & $e version --format '{{.Server.Version}}' 2>$null | Out-Null; if ($LASTEXITCODE -eq 0) { $Docker = $e; break } }
   }
 }
 if (-not $Docker) { [Console]::Error.WriteLine('claude-box: neither docker nor podman found'); exit 1 }
 # Rootless podman: map the box user (1000) to your own user, so files it writes are yours.
 $UserNs = @()
-if ((Split-Path -Leaf $Docker) -match '^podman' -and (& $Docker info --format '{{.Host.Security.Rootless}}' 2>$null) -eq 'true') {
-  $UserNs = @('--userns=keep-id:uid=1000,gid=1000')
+if ((Split-Path -Leaf $Docker) -match '^podman') {
+  $rootless = & $Docker info --format '{{.Host.Security.Rootless}}' 2>$null
+  if ($LASTEXITCODE -ne 0) {   # the Podman VM doesn't start on its own after a reboot
+    [Console]::Error.WriteLine('claude-box: starting the Podman machine...')
+    # its helper processes keep running: start them outside the project, or they lock the folder
+    $log = Join-Path $env:TEMP 'claude-box-podman-start.log'
+    $p = Start-Process -FilePath (Get-Command $Docker).Source -ArgumentList 'machine','start' -WorkingDirectory $env:SystemRoot `
+      -NoNewWindow -PassThru -RedirectStandardOutput $log -RedirectStandardError "$log.err"
+    $null = $p.Handle; $p.WaitForExit()
+    $out = @(Get-Content $log, "$log.err" -ErrorAction SilentlyContinue)
+    $rootless = & $Docker info --format '{{.Host.Security.Rootless}}' 2>$null
+    if ($LASTEXITCODE -ne 0) { $out | ForEach-Object { [Console]::Error.WriteLine("$_") }; [Console]::Error.WriteLine('claude-box: Podman is not running (see above)'); exit 1 }
+  }
+  if ($rootless -eq 'true') { $UserNs = @('--userns=keep-id:uid=1000,gid=1000') }
 }
 
 # --- Config: global package list + optional root setup script ----------------

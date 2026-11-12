@@ -25,14 +25,20 @@ if [[ -z "$DOCKER" ]]; then
   found=(); for e in docker podman; do command -v "$e" >/dev/null 2>&1 && found+=("$e"); done
   (( ${#found[@]} )) || { echo "claude-box: neither docker nor podman found" >&2; exit 1; }
   DOCKER="${found[0]}"
-  if (( ${#found[@]} > 1 )); then   # both installed: take the one that is running
+  if (( ${#found[@]} > 1 )); then   # both installed: take the one that is running, else podman (we can start it)
+    DOCKER=podman
     for e in "${found[@]}"; do if "$e" version --format '{{.Server.Version}}' >/dev/null 2>&1; then DOCKER="$e"; break; fi; done
   fi
 fi
 # Rootless podman: map the box user to your own user, so files it writes are yours.
 USERNS=()
-if [[ "$(basename "$DOCKER")" == podman* && "$("$DOCKER" info --format '{{.Host.Security.Rootless}}' 2>/dev/null)" == true ]]; then
-  USERNS=(--userns="keep-id:uid=$U_ID,gid=$G_ID")
+if [[ "$(basename "$DOCKER")" == podman* ]]; then
+  if ! ROOTLESS="$("$DOCKER" info --format '{{.Host.Security.Rootless}}' 2>/dev/null)" && [[ -n "$("$DOCKER" machine list -q 2>/dev/null)" ]]; then
+    echo "claude-box: starting the Podman machine..." >&2   # macOS: the VM doesn't start on its own after a reboot
+    OUT="$("$DOCKER" machine start 2>&1)" || true
+    ROOTLESS="$("$DOCKER" info --format '{{.Host.Security.Rootless}}' 2>/dev/null)" || { echo "$OUT" >&2; echo "claude-box: Podman is not running (see above)" >&2; exit 1; }
+  fi
+  if [[ "${ROOTLESS:-}" == true ]]; then USERNS=(--userns="keep-id:uid=$U_ID,gid=$G_ID"); fi
 fi
 
 # --- Global package list + optional root setup script (build time only) -------
