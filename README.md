@@ -1,14 +1,21 @@
 # claude-box
 
-Run [Claude Code](https://claude.com/claude-code) in a Docker container instead of a VM.
+Run [Claude Code](https://claude.com/claude-code) in a container (Docker or Podman) instead of a VM.
 It sees your project folder and Claude's sessions and memory, and nothing else on the host.
 No Claude install is needed on the host. All arguments pass through (`claude-box -c`, `--resume`, `-p "..."`).
 
 ## Install
 
-Requires Docker: [Docker Desktop for Windows](https://docs.docker.com/desktop/setup/install/windows-install/),
-[Docker Desktop for macOS](https://docs.docker.com/desktop/setup/install/mac-install/),
-or [Docker Engine on Linux](https://docs.docker.com/engine/install/).
+Requires a container engine, any of:
+
+- [Podman](https://podman.io/docs/installation) (free, Apache 2.0). On Windows the installer needs no admin rights;
+  afterwards run `podman machine init` and `podman machine start` once. Rootless Podman is fine.
+- [Rancher Desktop](https://rancherdesktop.io) (free, Apache 2.0) with the dockerd (moby) engine.
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (needs a paid subscription in larger companies)
+  or [Docker Engine on Linux](https://docs.docker.com/engine/install/).
+
+claude-box uses `docker` if it's installed, else `podman`. If both are installed, it uses the one that's running.
+`CLAUDE_BOX_ENGINE=podman` forces one.
 
 ```sh
 git clone https://github.com/krauthaufen/claude-box ~/claude-box && ~/claude-box/install.sh   # Linux / macOS
@@ -77,12 +84,12 @@ The example installs both SDKs side by side. Delete the one you don't need. Run 
 
 ## Fast mode (Windows, experimental)
 
-Docker on Windows runs in a VM, and every file access from the box to `C:\` crosses into Windows and back.
+Containers on Windows run in a VM, and every file access from the box to `C:\` crosses into Windows and back.
 That makes file-heavy work slow: on a 1,000-file repo `git status` takes 2 s instead of 0.02 s, and searching 0.9 s instead of 0.02 s.
 (Compiling is barely affected: Aardvark.Rendering builds in 169 s through the share, 152 s in fast mode, 154 s natively.)
 `claude-box --box-sync` copies the project into the VM instead. It's off unless you pass the flag:
 
-- The copy lives in a Docker volume and is kept in two-way sync with your folder by [Mutagen](https://mutagen.io)
+- The copy lives in a container volume and is kept in two-way sync with your folder by [Mutagen](https://mutagen.io)
   (downloaded once, checksum-pinned). Edits on either side arrive within about a second.
 - `.claude/`, `.git/hooks`, `.git/config`, `.mcp.json`, `.envrc` and `CLAUDE.local.md` are never synced back.
 - `bin/` and `obj/` stay in the VM, so build output isn't visible on Windows and is gone after the session.
@@ -102,4 +109,4 @@ That makes file-heavy work slow: on a 1,000-file repo `git status` takes 2 s ins
 - Run it from the repo root, because only the current folder is mounted.
 - Hooks and MCP servers in your settings that call host-only programs won't work inside the box.
 - Env: `CLAUDE_BOX_ENV` (extra env var names), `CLAUDE_BOX_MOUNTS` (extra read-only paths),
-  `CLAUDE_BOX_DOCKER_ARGS`, `CLAUDE_BOX_MEMORY` (default `8g`).
+  `CLAUDE_BOX_DOCKER_ARGS`, `CLAUDE_BOX_MEMORY` (default `8g`), `CLAUDE_BOX_ENGINE` (`docker` or `podman`).

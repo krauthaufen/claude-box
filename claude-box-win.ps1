@@ -1,4 +1,4 @@
-# claude-box — run Claude Code inside a Docker container (Windows, Docker Desktop / Linux containers).
+# claude-box — run Claude Code inside a container (Windows: Docker Desktop, Rancher Desktop or Podman).
 # Same isolation model as ./claude-box (see there). Windows paths appear as /c/Users/... in the
 # container; the per-project session dir is cross-mounted so --resume / --continue share
 # sessions and memory with the native Windows CLI.
@@ -14,6 +14,22 @@ function Escape-Project([string]$p) { return ($p -replace '[^a-zA-Z0-9]','-') } 
 function Sha([string]$s) {
   $h = [Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($s))
   return (($h | ForEach-Object { $_.ToString('x2') }) -join '').Substring(0,10)
+}
+
+# --- Container engine: docker (Docker Desktop, Rancher Desktop with dockerd) or podman ------
+$Docker = $env:CLAUDE_BOX_ENGINE
+if (-not $Docker) {
+  $found = @('docker','podman' | Where-Object { Get-Command $_ -ErrorAction SilentlyContinue })
+  $Docker = $found | Select-Object -First 1
+  if ($found.Count -gt 1) {   # both installed: take the one that is running
+    foreach ($e in $found) { & $e version --format '{{.Server.Version}}' 2>$null | Out-Null; if ($LASTEXITCODE -eq 0) { $Docker = $e; break } }
+  }
+}
+if (-not $Docker) { [Console]::Error.WriteLine('claude-box: neither docker nor podman found'); exit 1 }
+# Rootless podman: map the box user (1000) to your own user, so files it writes are yours.
+$UserNs = @()
+if ((Split-Path -Leaf $Docker) -match '^podman' -and (& $Docker info --format '{{.Host.Security.Rootless}}' 2>$null) -eq 'true') {
+  $UserNs = @('--userns=keep-id:uid=1000,gid=1000')
 }
 
 # --- Config: global package list + optional root setup script ----------------
@@ -48,12 +64,12 @@ $StateRoot = if ($env:CLAUDE_BOX_STATE) { $env:CLAUDE_BOX_STATE } else { Join-Pa
 if ($Rest.Count -gt 0 -and $Rest[0] -eq '--cleanup') {   # sync back + remove leftover fast-mode copies
   . (Join-Path $Repo 'claude-box-sync.ps1'); Invoke-BoxSyncCleanup ''; exit 0
 }
-if ($Rest.Count -gt 0 -and $Rest[0] -eq '--box-rebuild') { $Rest = $Rest[1..($Rest.Count)] | Where-Object { $_ -ne $null }; & docker image rm -f $Tag 2>$null | Out-Null }
-& docker image inspect $Tag 2>$null | Out-Null
+if ($Rest.Count -gt 0 -and $Rest[0] -eq '--box-rebuild') { $Rest = $Rest[1..($Rest.Count)] | Where-Object { $_ -ne $null }; & $Docker image rm -f $Tag 2>$null | Out-Null }
+& $Docker image inspect $Tag 2>$null | Out-Null
 if ($LASTEXITCODE -ne 0) {
   [Console]::Error.WriteLine("claude-box: building image $Tag (one-time, a few minutes)...")
   for ($attempt = 1; $attempt -le 3; $attempt++) {   # finished layers are cached, so a retry only redoes the failed step
-    & docker build -t $Tag -f (Join-Path $Repo 'Dockerfile') `
+    & $Docker build -t $Tag -f (Join-Path $Repo 'Dockerfile') `
       --build-arg UID=1000 --build-arg GID=1000 --build-arg UNAME=$UName --build-arg HOMEDIR=$CHome `
       --build-arg VERSION=$Version --build-arg "PACKAGES=$Packages" --build-arg "SETUP_B64=$SetupB64" $Repo
     if ($LASTEXITCODE -eq 0) { break }
@@ -158,7 +174,7 @@ if ($i -gt 0) { $DArgs += @('-e', "GIT_CONFIG_COUNT=$i") }
 $Tty = if ([Console]::IsInputRedirected -or [Console]::IsOutputRedirected) { '-i' } else { '-it' }
 $Extra = @(); if ($env:CLAUDE_BOX_DOCKER_ARGS) { $Extra = $env:CLAUDE_BOX_DOCKER_ARGS -split '\s+' }
 $Mem = if ($env:CLAUDE_BOX_MEMORY) { $env:CLAUDE_BOX_MEMORY } else { '8g' }
-& docker run --rm $Tty --hostname $env:COMPUTERNAME --cap-drop ALL --cap-add NET_ADMIN --cap-add SETUID --cap-add SETGID --cap-add SETPCAP --security-opt no-new-privileges --pids-limit 4096 --memory $Mem @Extra @DArgs -e "CLAUDE_BOX_NET=$NetRules" $Tag @Rest
+& $Docker run --rm $Tty @UserNs --user 0:0 --hostname $env:COMPUTERNAME --cap-drop ALL --cap-add NET_ADMIN --cap-add SETUID --cap-add SETGID --cap-add SETPCAP --security-opt no-new-privileges --pids-limit 4096 --memory $Mem @Extra @DArgs -e "CLAUDE_BOX_NET=$NetRules" $Tag @Rest
 $Rc = $LASTEXITCODE
 if ($Sync) { Exit-BoxSync $Sync }
 exit $Rc

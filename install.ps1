@@ -14,7 +14,7 @@ if ($Uninstall) {
   exit 0
 }
 
-if (-not (Get-Command docker -ErrorAction SilentlyContinue)) { throw 'docker not found - install Docker Desktop first' }
+if (-not (Get-Command docker,podman -ErrorAction SilentlyContinue)) { throw 'docker or podman not found - install Docker Desktop, Rancher Desktop or Podman first' }
 $p = [Environment]::GetEnvironmentVariable('Path','User')
 if (($p -split ';') -notcontains $Repo) { [Environment]::SetEnvironmentVariable('Path', ($p.TrimEnd(';') + ";$Repo"), 'User') }
 $Conf = Join-Path $env:APPDATA 'claude-box'; New-Item -ItemType Directory -Force $Conf | Out-Null

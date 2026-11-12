@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# claude-box — run Claude Code isolated in a Docker container (Linux / macOS).
+# claude-box — run Claude Code isolated in a container (Linux / macOS; docker or podman).
 #
 # Isolation model: nothing the container writes can be executed by the host afterwards.
 #  - The box has its OWN config dir (private state), mounted at the host config path.
@@ -18,6 +18,22 @@ SRC="${BASH_SOURCE[0]}"; while [[ -L "$SRC" ]]; do l="$(readlink "$SRC")"; [[ "$
 REPO="$(cd "$(dirname "$SRC")" && pwd -P)"
 U_ID="$(id -u)"; G_ID="$(id -g)"; U_NAME="$(id -un)"
 hash10() { (sha256sum 2>/dev/null || shasum -a 256) | cut -c1-10; }
+
+# --- Container engine: docker, or podman (CLAUDE_BOX_ENGINE overrides) ---------
+DOCKER="${CLAUDE_BOX_ENGINE:-}"
+if [[ -z "$DOCKER" ]]; then
+  found=(); for e in docker podman; do command -v "$e" >/dev/null 2>&1 && found+=("$e"); done
+  (( ${#found[@]} )) || { echo "claude-box: neither docker nor podman found" >&2; exit 1; }
+  DOCKER="${found[0]}"
+  if (( ${#found[@]} > 1 )); then   # both installed: take the one that is running
+    for e in "${found[@]}"; do if "$e" version --format '{{.Server.Version}}' >/dev/null 2>&1; then DOCKER="$e"; break; fi; done
+  fi
+fi
+# Rootless podman: map the box user to your own user, so files it writes are yours.
+USERNS=()
+if [[ "$(basename "$DOCKER")" == podman* && "$("$DOCKER" info --format '{{.Host.Security.Rootless}}' 2>/dev/null)" == true ]]; then
+  USERNS=(--userns="keep-id:uid=$U_ID,gid=$G_ID")
+fi
 
 # --- Global package list + optional root setup script (build time only) -------
 CONF_DIR="${CLAUDE_BOX_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/claude-box}"
@@ -39,11 +55,11 @@ VERSION="${VERSION:-latest}"
 # --- Image ---------------------------------------------------------------------
 HASH="$( { cat "$REPO/Dockerfile" "$REPO/entry.sh"; printf '|%s|%s|%s' "$PACKAGES" "$SETUP_B64" "$HOME"; } | hash10)"
 TAG="${CLAUDE_BOX_IMAGE:-claude-box}:${VERSION}-${U_ID}-${HASH}"
-if [[ "${1:-}" == "--box-rebuild" ]]; then shift; docker image rm -f "$TAG" >/dev/null 2>&1 || true; fi
-if ! docker image inspect "$TAG" >/dev/null 2>&1; then
+if [[ "${1:-}" == "--box-rebuild" ]]; then shift; "$DOCKER" image rm -f "$TAG" >/dev/null 2>&1 || true; fi
+if ! "$DOCKER" image inspect "$TAG" >/dev/null 2>&1; then
   echo "claude-box: building image $TAG (one-time, a few minutes)..." >&2
   for attempt in 1 2 3; do   # finished layers are cached, so a retry only redoes the failed step
-    if docker build -t "$TAG" -f "$REPO/Dockerfile" \
+    if "$DOCKER" build -t "$TAG" -f "$REPO/Dockerfile" \
       --build-arg UID="$U_ID" --build-arg GID="$G_ID" --build-arg UNAME="$U_NAME" \
       --build-arg HOMEDIR="$HOME" --build-arg VERSION="$VERSION" \
       --build-arg PACKAGES="$PACKAGES" --build-arg SETUP_B64="$SETUP_B64" "$REPO" >&2; then break; fi
@@ -137,6 +153,6 @@ fi
 if (( n > 0 )); then ENVS+=(-e "GIT_CONFIG_COUNT=$n"); fi
 
 TTY=(-i); if [[ -t 0 && -t 1 ]]; then TTY=(-it); fi
-exec docker run --rm "${TTY[@]}" --hostname "$(hostname)" \
+exec "$DOCKER" run --rm "${TTY[@]}" ${USERNS[@]+"${USERNS[@]}"} --user 0:0 --hostname "$(hostname 2>/dev/null || uname -n)" \
   --cap-drop ALL --cap-add NET_ADMIN --cap-add SETUID --cap-add SETGID --cap-add SETPCAP --security-opt no-new-privileges --pids-limit 4096 --memory "${CLAUDE_BOX_MEMORY:-8g}" \
   ${CLAUDE_BOX_DOCKER_ARGS:-} "${MOUNTS[@]}" ${ENVS[@]+"${ENVS[@]}"} -e "CLAUDE_BOX_NET=$NET_RULES" "$TAG" "$@"
