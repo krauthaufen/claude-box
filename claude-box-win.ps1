@@ -73,6 +73,7 @@ $Image = if ($env:CLAUDE_BOX_IMAGE) { $env:CLAUDE_BOX_IMAGE } else { 'claude-box
 $Tag = "${Image}:$Version-1000-$Hash"
 $Rest = @($args)
 $BoxSync = $Rest -contains '--box-sync'; $Rest = @($Rest | Where-Object { $_ -ne '--box-sync' })   # opt-in fast mode
+$Gpu = $Rest -contains '--gpu'; $Rest = @($Rest | Where-Object { $_ -ne '--gpu' })   # opt-in GPU
 $StateRoot = if ($env:CLAUDE_BOX_STATE) { $env:CLAUDE_BOX_STATE } else { Join-Path $env:LOCALAPPDATA 'claude-box' }
 if ($Rest.Count -gt 0 -and $Rest[0] -eq '--cleanup') {   # sync back + remove leftover fast-mode copies
   . (Join-Path $Repo 'claude-box-sync.ps1'); Invoke-BoxSyncCleanup ''; exit 0
@@ -183,6 +184,10 @@ if (Get-Command git -ErrorAction SilentlyContinue) {
 $i = 0
 foreach ($k in $GitCfg.Keys) { $DArgs += @('-e', "GIT_CONFIG_KEY_$i=$k", '-e', "GIT_CONFIG_VALUE_$i=$($GitCfg[$k])"); $i++ }
 if ($i -gt 0) { $DArgs += @('-e', "GIT_CONFIG_COUNT=$i") }
+
+# GPU: WSL's paravirtualized GPU (any vendor) and its driver libraries. OpenGL runs through Mesa's
+# D3D12 driver (Mesa would otherwise fall back to the CPU), CUDA on NVIDIA.
+if ($Gpu) { $DArgs += @('--device', '/dev/dxg', '-v', '/usr/lib/wsl:/usr/lib/wsl:ro', '-e', 'LD_LIBRARY_PATH=/usr/lib/wsl/lib', '-e', 'GALLIUM_DRIVER=d3d12') }
 
 $Tty = if ([Console]::IsInputRedirected -or [Console]::IsOutputRedirected) { '-i' } else { '-it' }
 $Extra = @(); if ($env:CLAUDE_BOX_DOCKER_ARGS) { $Extra = $env:CLAUDE_BOX_DOCKER_ARGS -split '\s+' }

@@ -25,6 +25,19 @@ printf '%s\n' "${CLAUDE_BOX_NET:-}" | sed 's/#.*//' | while read -r act cidr _; 
   apply "$act" "$cidr"
 done
 
+# GPU device nodes (only present with --gpu): give the box user their groups, whose ids come from the host.
+# (edits /etc/group directly: usermod also rewrites /etc/gshadow, which needs CAP_CHOWN)
+U=$(id -un "$BOX_UID"); seen=" "
+for d in /dev/dri/* /dev/dxg /dev/nvidia*; do
+  [ -c "$d" ] || continue
+  g=$(stat -c %g "$d"); case "$seen" in *" $g "*) continue ;; esac; seen="$seen$g "
+  case "$g" in 0|65534) continue ;; esac
+  if getent group "$g" >/dev/null; then
+    awk -F: -v OFS=: -v g="$g" -v u="$U" '$3 == g { $4 = ($4 == "" ? u : $4 "," u) } 1' /etc/group > /tmp/group
+    cat /tmp/group > /etc/group; rm -f /tmp/group
+  else echo "gpu$g:x:$g:$U" >> /etc/group; fi
+done
+
 exec setpriv --reuid="$BOX_UID" --regid="$BOX_GID" --init-groups \
   --inh-caps=-all --ambient-caps=-all --bounding-set=-all --no-new-privs \
   -- /usr/bin/tini -- claude "$@"

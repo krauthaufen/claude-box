@@ -19,6 +19,11 @@ REPO="$(cd "$(dirname "$SRC")" && pwd -P)"
 U_ID="$(id -u)"; G_ID="$(id -g)"; U_NAME="$(id -un)"
 hash10() { (sha256sum 2>/dev/null || shasum -a 256) | cut -c1-10; }
 
+# --- Flags for the launcher itself -------------------------------------------------
+WANT_GPU=0; ARGS=()
+for a in "$@"; do if [[ "$a" == --gpu ]]; then WANT_GPU=1; else ARGS+=("$a"); fi; done
+set -- ${ARGS[@]+"${ARGS[@]}"}
+
 # --- Container engine: docker, or podman (CLAUDE_BOX_ENGINE overrides) ---------
 DOCKER="${CLAUDE_BOX_ENGINE:-}"
 if [[ -z "$DOCKER" ]]; then
@@ -158,7 +163,18 @@ if command -v git >/dev/null 2>&1; then
 fi
 if (( n > 0 )); then ENVS+=(-e "GIT_CONFIG_COUNT=$n"); fi
 
+# --- GPU (--gpu): WSL's paravirtual GPU, NVIDIA (container toolkit) and /dev/dri render nodes ---
+GPU=()
+if (( WANT_GPU )); then
+  if [[ -e /dev/dxg ]]; then GPU+=(--device /dev/dxg -v /usr/lib/wsl:/usr/lib/wsl:ro -e LD_LIBRARY_PATH=/usr/lib/wsl/lib -e GALLIUM_DRIVER=d3d12); fi   # WSL
+  if [[ -e /dev/nvidiactl ]]; then
+    if [[ "$(basename "$DOCKER")" == podman* ]]; then GPU+=(--device nvidia.com/gpu=all); else GPU+=(--gpus all -e NVIDIA_DRIVER_CAPABILITIES=all); fi   # all: graphics too, not just compute
+  fi
+  if [[ -d /dev/dri ]]; then GPU+=(--device /dev/dri); fi
+  (( ${#GPU[@]} )) || { echo "claude-box: --gpu: no GPU found that containers can use" >&2; exit 1; }
+fi
+
 TTY=(-i); if [[ -t 0 && -t 1 ]]; then TTY=(-it); fi
 exec "$DOCKER" run --rm "${TTY[@]}" ${USERNS[@]+"${USERNS[@]}"} --user 0:0 --hostname "$(hostname 2>/dev/null || uname -n)" \
   --cap-drop ALL --cap-add NET_ADMIN --cap-add SETUID --cap-add SETGID --cap-add SETPCAP --security-opt no-new-privileges --pids-limit 4096 --memory "${CLAUDE_BOX_MEMORY:-8g}" \
-  ${CLAUDE_BOX_DOCKER_ARGS:-} "${MOUNTS[@]}" ${ENVS[@]+"${ENVS[@]}"} -e "CLAUDE_BOX_NET=$NET_RULES" "$TAG" "$@"
+  ${CLAUDE_BOX_DOCKER_ARGS:-} ${GPU[@]+"${GPU[@]}"} "${MOUNTS[@]}" ${ENVS[@]+"${ENVS[@]}"} -e "CLAUDE_BOX_NET=$NET_RULES" "$TAG" "$@"

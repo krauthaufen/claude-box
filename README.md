@@ -92,6 +92,20 @@ copy %USERPROFILE%\claude-box\setup.sh.example %APPDATA%\claude-box\setup.sh    
 
 The example installs both SDKs side by side. Delete the one you don't need. Run `claude-box --box-rebuild` from time to time to pick up .NET patch releases.
 
+## GPU
+
+`claude-box --gpu` gives the box the host's GPU. It's off by default: the GPU driver on the host
+processes what the box sends it, which is extra attack surface.
+
+- Linux, NVIDIA: needs the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html).
+  CUDA, Vulkan and OpenGL run on the real driver. Other GPUs are passed as `/dev/dri` (Mesa drivers).
+- Windows (Docker Desktop or Podman), any GPU vendor: OpenGL 4.6 runs on the GPU via Mesa's D3D12 driver, CUDA on NVIDIA.
+  Vulkan falls back to the CPU (llvmpipe), because Debian's Mesa lacks the D3D12-based Vulkan driver.
+- macOS: not supported.
+
+The image has no graphics libraries. Add them to the [packages](#packages) file:
+`libvulkan1 mesa-vulkan-drivers libegl1 libgl1 libxext6`, plus `vulkan-tools mesa-utils` for checking with `vulkaninfo` and `eglinfo`.
+
 ## Fast mode (Windows, experimental)
 
 Containers on Windows run in a VM, and every file access from the box to `C:\` crosses into Windows and back.
