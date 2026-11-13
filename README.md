@@ -100,7 +100,11 @@ processes what the box sends it, which is extra attack surface.
 - Linux, NVIDIA: needs the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html).
   CUDA, Vulkan and OpenGL run on the real driver. Other GPUs are passed as `/dev/dri` (Mesa drivers).
 - Windows (Docker Desktop or Podman), any GPU vendor: OpenGL 4.6 runs on the GPU via Mesa's D3D12 driver, CUDA on NVIDIA.
-  Vulkan falls back to the CPU (llvmpipe), because Debian's Mesa lacks the D3D12-based Vulkan driver.
+  Vulkan needs Mesa's D3D12-based driver ("dozen"), which Debian doesn't package. `setup-vulkan-wsl.sh` builds it
+  (about 2 minutes, once per image build); append it to your `setup.sh`:
+  `type %USERPROFILE%\claude-box\setup-vulkan-wsl.sh >> %APPDATA%\claude-box\setup.sh`.
+  This gives Vulkan 1.2 on the GPU. Dozen isn't a conformant driver, so some features or extensions may be missing.
+  Without it, Vulkan runs on the CPU (llvmpipe).
 - macOS: not supported.
 
 The image has no graphics libraries. Add them to the [packages](#packages) file:
